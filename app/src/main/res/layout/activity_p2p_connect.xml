@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="@drawable/back"
+    tools:context=".P2PConnectActivity">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/select_connection_type"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        android:layout_marginBottom="40dp"/>
+
+    <Button
+        android:id="@+id/btn_bluetooth_mode"
+        style="@style/MainButton"
+        android:layout_width="300dp"
+        android:layout_height="90dp"
+        android:text="@string/bluetooth"
+        android:backgroundTint="#00BCD4"
+        android:drawableLeft="@drawable/ic_bluetooth"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:layout_marginBottom="30dp"/>
+
+    <Button
+        android:id="@+id/btn_wifi_direct_mode"
+        style="@style/MainButton"
+        android:layout_width="300dp"
+        android:layout_height="90dp"
+        android:text="@string/wifi_direct"
+        android:backgroundTint="#FF9800"
+        android:drawableLeft="@drawable/ic_wifi"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"/>
+
+</LinearLayout>

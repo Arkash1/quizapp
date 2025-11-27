@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity"
+    android:background="@android:color/black">
+
+    <FrameLayout
+        android:id="@+id/start_screen_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/app_name"
+            android:textSize="48sp"
+            android:textColor="@android:color/white"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_continue"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="50dp"
+            android:text="@string/tap_to_continue"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:alpha="0"
+            />
+    </FrameLayout>
+
+    <RelativeLayout
+        android:id="@+id/main_screen_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/back">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_centerInParent="true"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/btn_play"
+                style="@style/MainButton"
+                android:text="@string/play_button"
+                android:layout_marginBottom="20dp" />
+
+            <Button
+                android:id="@+id/btn_shop"
+                style="@style/MainButton"
+                android:text="@string/shop_button"
+                android:layout_marginBottom="20dp" />
+
+            <Button
+                android:id="@+id/btn_settings"
+                style="@style/MainButton"
+                android:text="@string/settings_button"
+                android:layout_marginBottom="20dp" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+</FrameLayout>

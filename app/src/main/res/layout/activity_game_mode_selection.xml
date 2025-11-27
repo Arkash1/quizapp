@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="16dp"
+    android:background="@drawable/back"
+    tools:context=".GameModeSelectionActivity">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/select_game_mode"
+        android:textSize="30sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/white"
+        android:layout_marginBottom="50dp"/>
+
+    <Button
+        android:id="@+id/btn_single_player"
+        style="@style/MainButton"
+        android:layout_width="300dp"
+        android:layout_height="100dp"
+        android:text="@string/single_player"
+        android:drawableLeft="@drawable/ic_person"
+        android:paddingLeft="24dp"
+        android:paddingRight="24dp"
+        android:backgroundTint="#4CAF50"
+        android:layout_marginBottom="30dp"/>
+
+    <Button
+        android:id="@+id/btn_pvp_player"
+        style="@style/MainButton"
+        android:layout_width="300dp"
+        android:layout_height="100dp"
+        android:text="@string/two_players"
+        android:drawableLeft="@drawable/ic_group"
+        android:paddingLeft="24dp"
+        android:paddingRight="24dp"
+        android:backgroundTint="#2196F3"/>
+
+</LinearLayout>

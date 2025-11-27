@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="@drawable/back"
+    tools:context=".EndGameActivity">
+
+    <TextView
+        android:id="@+id/tv_result_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Победа!"
+        android:textSize="48sp"
+        android:textStyle="bold"
+        android:textColor="#4CAF50"
+        android:layout_marginBottom="20dp"/>
+
+    <TextView
+        android:id="@+id/tv_result_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Поздравляем! Вы набрали максимум очков."
+        android:textSize="20sp"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:layout_marginBottom="40dp"/>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp"
+        android:background="@drawable/rounded_panel_bg"
+        android:layout_marginBottom="50dp">
+
+        <TextView
+            android:id="@+id/tv_score_local"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/your_score"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="10dp"/>
+
+        <TextView
+            android:id="@+id/tv_score_opponent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/opponent_score"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#FFEB3B"
+            android:visibility="visible"/>
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btn_continue"
+        style="@style/MainButton"
+        android:layout_width="300dp"
+        android:layout_height="wrap_content"
+        android:text="@string/go_to_main_menu"
+        android:backgroundTint="#03A9F4"/>
+
+</LinearLayout>

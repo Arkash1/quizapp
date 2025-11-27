@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".P2PDiscoveryActivity">
+
+    <TextView
+        android:id="@+id/connection_info_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Выберите устройство для подключения или дождитесь входящего соединения:"
+        android:textSize="16sp"
+        android:paddingBottom="8dp" />
+
+    <Button
+        android:id="@+id/btn_start_discovery"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Начать поиск устройств"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/status_text_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Ожидание старта поиска..."
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Найденные устройства (нажмите для подключения):"
+        android:textSize="14sp"
+        android:paddingTop="8dp" />
+
+    <ListView
+        android:id="@+id/devices_list_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/darker_gray"
+        android:dividerHeight="1dp"
+        android:paddingTop="4dp" />
+
+</LinearLayout>

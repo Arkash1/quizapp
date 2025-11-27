@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@drawable/back"
+    tools:context=".StatsActivity">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="СТАТИСТИКА ИГРОКА"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF"
+        android:gravity="center"
+        android:layout_marginBottom="30dp"/>
+
+    <TextView
+        android:id="@+id/tv_stats_player_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="[Имя игрока]"
+        android:textSize="24sp"
+        android:textStyle="italic"
+        android:textColor="#FFC107"
+        android:gravity="center"
+        android:layout_marginBottom="20dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/rounded_panel_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:id="@+id/tv_stats_total_points"
+            style="@style/StatRow"
+            android:text="@string/stat_points_format"/>
+
+        <View style="@style/StatDivider" />
+
+        <TextView
+            android:id="@+id/tv_stats_single_wins"
+            style="@style/StatRow"
+            android:text="@string/stat_single_wins_format"/>
+
+        <View style="@style/StatDivider" />
+
+        <TextView
+            android:id="@+id/tv_stats_pvp_wins"
+            style="@style/StatRow"
+            android:text="@string/stat_pvp_wins_format"/>
+
+        <View style="@style/StatDivider" />
+
+        <TextView
+            android:id="@+id/tv_stats_emotes_owned"
+            style="@style/StatRow"
+            android:text="@string/stat_emotes_format"/>
+
+    </LinearLayout>
+
+</LinearLayout>

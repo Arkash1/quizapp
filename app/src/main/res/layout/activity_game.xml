@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/back"
+    tools:context=".GameActivity">
+
+    <LinearLayout
+        android:id="@+id/game_waiting_video_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#DD000000"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/tv_vs_screen"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="32sp"
+            android:textColor="#FFC107"
+            android:textStyle="bold"
+            tools:text="Игрок 1 VS Игрок 2"
+            android:gravity="center"
+            android:layout_marginBottom="40dp"/>
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:indeterminateTint="#FFFFFF"/>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/game_content_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:visibility="visible"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/rounded_panel_bg"
+            android:padding="8dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="start">
+
+                <TextView
+                    android:id="@+id/tv_opponent_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Противник"
+                    android:textSize="18sp"
+                    android:textColor="#FFEB3B"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:id="@+id/tv_opponent_stats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="#CCCCCC"
+                    tools:text="Побед: 5"/>
+
+                <LinearLayout
+                    android:id="@+id/ll_opponent_indicators"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp"/>
+
+                <VideoView
+                    android:id="@+id/vv_opponent_emote_display"
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
+                    android:layout_marginTop="4dp"
+                    android:visibility="gone"/>
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_timer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="15 с"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:textColor="@color/colorAccent"/>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="end">
+
+                <TextView
+                    android:id="@+id/tv_player_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Вы"
+                    android:textSize="18sp"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:id="@+id/tv_player_stats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="#CCCCCC"
+                    tools:text="Побед: 10"/>
+
+                <LinearLayout
+                    android:id="@+id/ll_player_indicators"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp"
+                    android:layout_gravity="end"/>
+
+                <VideoView
+                    android:id="@+id/vv_emote_display"
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
+                    android:layout_marginTop="4dp"
+                    android:visibility="gone"
+                    android:layout_gravity="end"/>
+
+            </LinearLayout>
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/rounded_panel_bg"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tv_question"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="22sp"
+                android:textColor="#FFFFFF"
+                android:textStyle="normal"
+                tools:text="Какой элемент имеет атомный номер 6?"
+                android:gravity="center"/>
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btn_option_1"
+                style="@style/AnswerButton"
+                tools:text="Вариант ответа 1"/>
+
+            <Button
+                android:id="@+id/btn_option_2"
+                style="@style/AnswerButton"
+                tools:text="Вариант ответа 2"/>
+
+            <Button
+                android:id="@+id/btn_option_3"
+                style="@style/AnswerButton"
+                tools:text="Вариант ответа 3"/>
+
+            <Button
+                android:id="@+id/btn_option_4"
+                style="@style/AnswerButton"
+                tools:text="Вариант ответа 4"/>
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/btn_emote_chat"
+        style="@style/AnswerButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentStart="true"
+        android:layout_margin="16dp"
+        android:padding="8dp"
+        android:scaleType="fitCenter"
+        android:background="@drawable/rounded_button_bg"
+        android:src="@drawable/ic_chat"
+        android:contentDescription="@string/emote_button"
+        tools:visibility="visible"/>
+
+</RelativeLayout>

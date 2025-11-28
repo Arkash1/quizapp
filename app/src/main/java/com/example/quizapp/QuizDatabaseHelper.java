@@ -7,14 +7,20 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.util.Log;
 
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * QuizDatabaseHelper — расширения:
+ * - поддержка таблицы inventory (купленные эмоции / предметы)
+ * - методы: addToInventory, removeFromInventory, isItemOwned, getOwnedEmotes, setItemEquipped, getEquippedItems
+ */
 public class QuizDatabaseHelper extends SQLiteOpenHelper {
 
     private static final String TAG = "QuizDBHelper";
     private static final String DATABASE_NAME = "QuizGame.db";
-    private static final int DATABASE_VERSION = 2; // !!! УВЕЛИЧЕНА ВЕРСИЯ БД !!!
+    private static final int DATABASE_VERSION = 2;
     private static QuizDatabaseHelper instance;
-
-    // ... (Существующие константы для QUESTIONS и PLAYER_STATS) ...
 
     // Таблица "Вопросы"
     public static final String TABLE_QUESTIONS = "questions";
@@ -34,15 +40,12 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
     public static final String STATS_COLUMN_PVP_WINS = "pvp_wins";
     public static final String STATS_COLUMN_POINTS = "points";
 
-    // =======================================================
-    // НОВАЯ ТАБЛИЦА: ИНВЕНТАРЬ (КУПЛЕННЫЕ ПРЕДМЕТЫ/ЭМОЦИИ)
-    // =======================================================
+    // Таблица "ИНВЕНТАРЬ"
     public static final String TABLE_INVENTORY = "inventory";
-    public static final String INVENTORY_COLUMN_ID = "item_id"; // Строковый ID из ShopItem
+    public static final String INVENTORY_COLUMN_ID = "item_id"; // строковый ID (например, emote_laugh)
     public static final String INVENTORY_COLUMN_NAME = "item_name";
     public static final String INVENTORY_COLUMN_EQUIPPED = "is_equipped"; // 0/1
 
-    // SQL для создания таблицы "Вопросы"
     private static final String CREATE_TABLE_QUESTIONS = "CREATE TABLE " +
             TABLE_QUESTIONS + "(" +
             COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -54,7 +57,6 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
             COLUMN_ANSWER_NUM + " INTEGER" +
             ")";
 
-    // SQL для создания таблицы "Настройки и Статистика Игрока"
     private static final String CREATE_TABLE_PLAYER_STATS = "CREATE TABLE " +
             TABLE_PLAYER_STATS + "(" +
             STATS_COLUMN_ID + " INTEGER PRIMARY KEY," +
@@ -64,14 +66,12 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
             STATS_COLUMN_POINTS + " INTEGER DEFAULT 0" +
             ")";
 
-    // SQL для создания таблицы "ИНВЕНТАРЬ"
     private static final String CREATE_TABLE_INVENTORY = "CREATE TABLE " +
             TABLE_INVENTORY + "(" +
-            INVENTORY_COLUMN_ID + " TEXT PRIMARY KEY," + // Используем строковый ID (emote_laugh) как первичный ключ
+            INVENTORY_COLUMN_ID + " TEXT PRIMARY KEY," +
             INVENTORY_COLUMN_NAME + " TEXT NOT NULL," +
             INVENTORY_COLUMN_EQUIPPED + " INTEGER DEFAULT 0" +
             ")";
-
 
     public static synchronized QuizDatabaseHelper getInstance(Context context) {
         if (instance == null) {
@@ -81,7 +81,6 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
     }
 
     private QuizDatabaseHelper(Context context) {
-        // !!! Убедитесь, что вы увеличили DATABASE_VERSION выше (до 2)
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
     }
 
@@ -89,31 +88,22 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         db.execSQL(CREATE_TABLE_QUESTIONS);
         db.execSQL(CREATE_TABLE_PLAYER_STATS);
-        db.execSQL(CREATE_TABLE_INVENTORY); // !!! СОЗДАЕМ ТАБЛИЦУ ИНВЕНТАРЯ !!!
+        db.execSQL(CREATE_TABLE_INVENTORY);
 
-        // Вставка начальных данных
         insertInitialStats(db);
         insertInitialQuestions(db);
         Log.d(TAG, "Базы данных и таблицы созданы.");
-
-        // --- Старая функция insertInitialEmotions удалена, т.к. мы используем TABLE_INVENTORY ---
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Удаляем старые таблицы, включая старую версию emotions
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_INVENTORY); // Удаляем новую таблицу, если она уже была
-        db.execSQL("DROP TABLE IF EXISTS " + "emotions"); // Удаляем старую таблицу эмоций (если существовала)
+        db.execSQL("DROP TABLE IF EXISTS " + TABLE_INVENTORY);
+        db.execSQL("DROP TABLE IF EXISTS " + "emotions");
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_PLAYER_STATS);
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_QUESTIONS);
-
-        // Пересоздаем все заново
         onCreate(db);
     }
 
-    // ... (insertInitialStats, getPlayerName, updatePlayerStats - без изменений) ...
-
-    // Вставка единственной начальной строки для статистики игрока
     private void insertInitialStats(SQLiteDatabase db) {
         ContentValues values = new ContentValues();
         values.put(STATS_COLUMN_ID, 1);
@@ -126,58 +116,60 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
 
     public String getPlayerName() {
         SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = db.query(TABLE_PLAYER_STATS, new String[]{STATS_COLUMN_NAME},
-                STATS_COLUMN_ID + "=1", null, null, null, null);
+        Cursor cursor = null;
         String name = null;
-        if (cursor.moveToFirst()) {
-            name = cursor.getString(cursor.getColumnIndexOrThrow(STATS_COLUMN_NAME));
+        try {
+            cursor = db.query(TABLE_PLAYER_STATS, new String[]{STATS_COLUMN_NAME},
+                    STATS_COLUMN_ID + "=1", null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                name = cursor.getString(cursor.getColumnIndexOrThrow(STATS_COLUMN_NAME));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getPlayerName failed", e);
+        } finally {
+            if (cursor != null) cursor.close();
         }
-        cursor.close();
-        return name;
+        return name != null ? name : "noname";
     }
 
     public void updatePlayerStats(int pointsEarned, boolean isPvp, boolean isWinner) {
         SQLiteDatabase db = this.getWritableDatabase();
         ContentValues values = new ContentValues();
 
-        // Увеличение очков
-        Cursor cursor = db.query(TABLE_PLAYER_STATS, new String[]{STATS_COLUMN_POINTS},
-                STATS_COLUMN_ID + "=1", null, null, null, null);
-        int currentPoints = 0;
-        if (cursor.moveToFirst()) {
-            currentPoints = cursor.getInt(cursor.getColumnIndexOrThrow(STATS_COLUMN_POINTS));
-        }
-        cursor.close();
-
-        values.put(STATS_COLUMN_POINTS, currentPoints + pointsEarned);
-
-        // Увеличение счетчика побед
-        if (isWinner) {
-            String winColumn = isPvp ? STATS_COLUMN_PVP_WINS : STATS_COLUMN_SINGLE_WINS;
-
-            Cursor winCursor = db.query(TABLE_PLAYER_STATS, new String[]{winColumn},
+        Cursor cursor = null;
+        try {
+            cursor = db.query(TABLE_PLAYER_STATS, new String[]{STATS_COLUMN_POINTS},
                     STATS_COLUMN_ID + "=1", null, null, null, null);
-            int currentWins = 0;
-            if (winCursor.moveToFirst()) {
-                currentWins = winCursor.getInt(winCursor.getColumnIndexOrThrow(winColumn));
+            int currentPoints = 0;
+            if (cursor != null && cursor.moveToFirst()) {
+                currentPoints = cursor.getInt(cursor.getColumnIndexOrThrow(STATS_COLUMN_POINTS));
             }
-            winCursor.close();
+            values.put(STATS_COLUMN_POINTS, currentPoints + pointsEarned);
 
-            values.put(winColumn, currentWins + 1);
+            if (isWinner) {
+                String winColumn = isPvp ? STATS_COLUMN_PVP_WINS : STATS_COLUMN_SINGLE_WINS;
+                Cursor winCursor = null;
+                int currentWins = 0;
+                try {
+                    winCursor = db.query(TABLE_PLAYER_STATS, new String[]{winColumn},
+                            STATS_COLUMN_ID + "=1", null, null, null, null);
+                    if (winCursor != null && winCursor.moveToFirst()) {
+                        currentWins = winCursor.getInt(winCursor.getColumnIndexOrThrow(winColumn));
+                    }
+                } finally {
+                    if (winCursor != null) winCursor.close();
+                }
+                values.put(winColumn, currentWins + 1);
+            }
+
+            db.update(TABLE_PLAYER_STATS, values, STATS_COLUMN_ID + "=1", null);
+            Log.d(TAG, "Статистика игрока обновлена. Очки: +" + pointsEarned + (isWinner ? " (Победа)" : ""));
+        } catch (Exception e) {
+            Log.e(TAG, "updatePlayerStats failed", e);
+        } finally {
+            if (cursor != null) cursor.close();
         }
-
-        db.update(TABLE_PLAYER_STATS, values, STATS_COLUMN_ID + "=1", null);
-        Log.d(TAG, "Статистика игрока обновлена. Очки: +" + pointsEarned + (isWinner ? " (Победа)" : ""));
     }
-
-
-    // --- УДАЛЕННЫЕ МЕТОДЫ, связанные со старой таблицей EMOTIONS ---
-    /*
-    private void insertInitialEmotions(SQLiteDatabase db) { ... }
-    private void insertEmotion(SQLiteDatabase db, String name, int cost) { ... }
-    */
-    // -----------------------------------------------------------------
-
 
     // TODO: Здесь нужно реализовать вставку всех 100 вопросов.
     private void insertInitialQuestions(SQLiteDatabase db) {
@@ -547,5 +539,106 @@ public class QuizDatabaseHelper extends SQLiteOpenHelper {
         values.put(COLUMN_OPTION4, opt4);
         values.put(COLUMN_ANSWER_NUM, answerNum);
         db.insert(TABLE_QUESTIONS, null, values);
+    }
+
+    // Inventory methods
+
+    public boolean addToInventory(String itemId, String itemName, boolean equipped) {
+        if (itemId == null) return false;
+        SQLiteDatabase db = this.getWritableDatabase();
+        try {
+            ContentValues values = new ContentValues();
+            values.put(INVENTORY_COLUMN_ID, itemId);
+            values.put(INVENTORY_COLUMN_NAME, itemName != null ? itemName : itemId);
+            values.put(INVENTORY_COLUMN_EQUIPPED, equipped ? 1 : 0);
+            long res = db.insertWithOnConflict(TABLE_INVENTORY, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+            return res != -1;
+        } catch (Exception e) {
+            Log.e(TAG, "addToInventory failed", e);
+            return false;
+        }
+    }
+
+    public boolean removeFromInventory(String itemId) {
+        if (itemId == null) return false;
+        SQLiteDatabase db = this.getWritableDatabase();
+        try {
+            int removed = db.delete(TABLE_INVENTORY, INVENTORY_COLUMN_ID + "=?", new String[]{itemId});
+            return removed > 0;
+        } catch (Exception e) {
+            Log.e(TAG, "removeFromInventory failed", e);
+            return false;
+        }
+    }
+
+    public boolean isItemOwned(String itemId) {
+        if (itemId == null) return false;
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        try {
+            cursor = db.query(TABLE_INVENTORY, new String[]{INVENTORY_COLUMN_ID},
+                    INVENTORY_COLUMN_ID + "=?", new String[]{itemId}, null, null, null);
+            return cursor != null && cursor.moveToFirst();
+        } catch (Exception e) {
+            Log.e(TAG, "isItemOwned failed", e);
+            return false;
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+    }
+
+    public List<String> getOwnedEmotes() {
+        List<String> res = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        try {
+            cursor = db.query(TABLE_INVENTORY, new String[]{INVENTORY_COLUMN_ID},
+                    null, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                do {
+                    String id = cursor.getString(cursor.getColumnIndexOrThrow(INVENTORY_COLUMN_ID));
+                    if (id != null) res.add(id);
+                } while (cursor.moveToNext());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getOwnedEmotes failed", e);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return res;
+    }
+
+    public boolean setItemEquipped(String itemId, boolean equipped) {
+        if (itemId == null) return false;
+        SQLiteDatabase db = this.getWritableDatabase();
+        try {
+            ContentValues values = new ContentValues();
+            values.put(INVENTORY_COLUMN_EQUIPPED, equipped ? 1 : 0);
+            int updated = db.update(TABLE_INVENTORY, values, INVENTORY_COLUMN_ID + "=?", new String[]{itemId});
+            return updated > 0;
+        } catch (Exception e) {
+            Log.e(TAG, "setItemEquipped failed", e);
+            return false;
+        }
+    }
+
+    public List<String> getEquippedItems() {
+        List<String> res = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        try {
+            cursor = db.query(TABLE_INVENTORY, new String[]{INVENTORY_COLUMN_ID},
+                    INVENTORY_COLUMN_EQUIPPED + "=?", new String[]{"1"}, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                do {
+                    res.add(cursor.getString(cursor.getColumnIndexOrThrow(INVENTORY_COLUMN_ID)));
+                } while (cursor.moveToNext());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getEquippedItems failed", e);
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return res;
     }
 }

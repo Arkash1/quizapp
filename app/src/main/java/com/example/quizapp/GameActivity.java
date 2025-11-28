@@ -3,6 +3,7 @@ package com.example.quizapp;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.CountDownTimer;
@@ -32,38 +33,56 @@ import com.example.quizapp.QuizDatabaseHelper;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+/**
+ * GameActivity — turn-based PvP behavior:
+ * - host answers first; client shows waiting screen (waiting_screen.mp4 animation)
+ * - after host answers, client receives host's ANSWER_SUBMITTED and becomes active (shows same question)
+ * - after client answers, host receives client's ANSWER_SUBMITTED and advances to next question (host active)
+ * - timer expiry counts as wrong answer (selectedOption = 0) and marks red indicator
+ * - emotes: only owned emotes can be used; EMOTE_USED is synchronized to opponent and shown on both sides
+ * - when a player disconnects/exits mid-game, the remaining player gets +20 points
+ */
 public class GameActivity extends AppCompatActivity implements P2PManager.ConnectionListener {
 
     private static final String TAG = "GameActivity";
     private static final int TOTAL_QUESTIONS = 5;
     private static final long TIMER_DURATION_MS = 15000;
 
-    // UI элементы
+    // UI elements
     private TextView tvQuestion, tvTimer, tvPlayerName, tvOpponentName;
     private TextView tvPlayerStats, tvOpponentStats;
     private Button[] answerButtons = new Button[4];
     private LinearLayout llPlayerIndicators, llOpponentIndicators;
     private View vWaitingScreen, vGameContent;
-    private VideoView vvEmoteDisplay, vvOpponentEmoteDisplay; // Для видео-эмоций
+    private VideoView vvEmoteDisplay, vvOpponentEmoteDisplay;
 
-    // P2P и состояние игры
+    // P2P and game state
     private P2PManager p2pManager;
     private boolean isPvpMode;
     private String localPlayerName;
-    private String opponentName = "AI Opponent"; // Значение по умолчанию
-    private boolean isMyTurn = false; // Актуально только для PvP
+    private String opponentName = "Противник";
+    private boolean isMyTurn = false;
+    private boolean amHost = false;
     private int currentQuestionIndex = 0;
     private int localPlayerScore = 0;
     private int opponentScore = 0;
 
-    // Данные вопросов
+    // Per-question flags
+    private boolean hostAnsweredCurrent = false;
+    private boolean clientAnsweredCurrent = false;
+
+    // Questions
     private List<Question> currentQuestions = new ArrayList<>();
     private CountDownTimer gameTimer;
     private boolean gameInProgress = false;
 
-    // Класс для хранения структуры вопроса (Serializable для P2P)
+    // Owned emotes
+    private Set<String> ownedEmotes = new HashSet<>();
+
     private static class Question implements Serializable {
         private static final long serialVersionUID = 1L;
         public int id;
@@ -72,31 +91,67 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         public int answerNum; // 1-4
     }
 
-// --- ON CREATE И ИНИЦИАЛИЗАЦИЯ ---
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_game);
 
+        isPvpMode = getIntent().getBooleanExtra("IS_PVP_MODE", false);
+
         initializeUI();
         loadLocalPlayerInfo();
 
-        isPvpMode = getIntent().getBooleanExtra("IS_PVP_MODE", false);
-
-        // Добавление индикаторов вопросов (кружочков)
-        setupQuestionIndicators(llPlayerIndicators);
-        if (isPvpMode) {
-            setupQuestionIndicators(llOpponentIndicators);
+        String intentOpponent = getIntent().getStringExtra("OPPONENT_NAME");
+        if (intentOpponent != null && !intentOpponent.trim().isEmpty()) {
+            opponentName = intentOpponent;
         }
+        tvOpponentName.setText(opponentName);
+
+        boolean intentHost = getIntent().getBooleanExtra("IS_HOST", false);
+        amHost = intentHost || P2PConnectionSingleton.getInstance().isGroupOwner();
+        isMyTurn = amHost;
+
+        setupQuestionIndicators(llPlayerIndicators);
+        if (isPvpMode) setupQuestionIndicators(llOpponentIndicators);
 
         if (isPvpMode) {
-            setupPvpMode();
+            p2pManager = P2PConnectionSingleton.getInstance().getActiveManager();
+            if (p2pManager == null) {
+                Toast.makeText(this, "P2P соединение не активно.", Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
+            // ensure callbacks come here
+            p2pManager.initialize(this, this);
+
+            // Request remote name in case we missed it
+            try { p2pManager.sendMessage("REQUEST_PLAYER_NAME"); } catch (Exception ignored) {}
+
+            // Load owned emotes
+            loadOwnedEmotes();
+
+            // Host behavior: host should prepare questions and send them to client, then show first question
+            if (amHost) {
+                loadQuestionsFromDB();
+                if (!currentQuestions.isEmpty()) {
+                    gameInProgress = true;
+                    // send START_GAME to client (questions)
+                    p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.START_GAME, (Serializable) currentQuestions));
+                    // host shows first question immediately
+                    showQuestion(currentQuestionIndex);
+                } else {
+                    Toast.makeText(this, "Не удалось загрузить вопросы для PVP.", Toast.LENGTH_LONG).show();
+                    endGame();
+                }
+            } else {
+                // client: do NOT show question at start; wait for host's START_GAME and host's first ANSWER_SUBMITTED to trigger client turn
+                showWaitingScreen();
+            }
         } else {
             setupSinglePlayerMode();
         }
 
-        QuizApplication.getInstance().stopBackgroundMusic(); // Останавливаем музыку меню
+        QuizApplication.getInstance().stopBackgroundMusic();
     }
 
     private void initializeUI() {
@@ -111,11 +166,9 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         vWaitingScreen = findViewById(R.id.game_waiting_video_container);
         vGameContent = findViewById(R.id.game_content_layout);
 
-        // VideoView для эмоций (заменили ImageView)
         vvEmoteDisplay = findViewById(R.id.vv_emote_display);
         vvOpponentEmoteDisplay = findViewById(R.id.vv_opponent_emote_display);
 
-        // Инициализация кнопок ответов
         answerButtons[0] = findViewById(R.id.btn_option_1);
         answerButtons[1] = findViewById(R.id.btn_option_2);
         answerButtons[2] = findViewById(R.id.btn_option_3);
@@ -123,16 +176,17 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
 
         for (int i = 0; i < 4; i++) {
             final int optionIndex = i + 1;
-            answerButtons[i].setOnClickListener(v -> handleAnswerSubmission(optionIndex));
+            answerButtons[i].setOnClickListener(v -> {
+                // only allow answering when it's player's turn in PvP
+                if (!isPvpMode || isMyTurn) handleAnswerSubmission(optionIndex);
+            });
         }
 
-        // Кнопка эмоций
         findViewById(R.id.btn_emote_chat).setOnClickListener(v -> showEmoteSelectionDialog());
     }
 
-    // Динамическое добавление кружочков-индикаторов
     private void setupQuestionIndicators(LinearLayout layout) {
-        layout.removeAllViews(); // Очистка заглушек из XML
+        layout.removeAllViews();
         for (int i = 0; i < TOTAL_QUESTIONS; i++) {
             ImageView indicator = new ImageView(this);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -141,7 +195,6 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
             params.setMargins(8, 0, 8, 0);
             indicator.setLayoutParams(params);
             indicator.setImageResource(R.drawable.ic_circle);
-            // Применяем стандартный цвет из styles.xml
             indicator.setColorFilter(getColor(R.color.colorLightGray));
             layout.addView(indicator);
         }
@@ -149,36 +202,50 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
 
     private void loadLocalPlayerInfo() {
         QuizDatabaseHelper dbHelper = QuizDatabaseHelper.getInstance(this);
-        Cursor cursor = dbHelper.getReadableDatabase().query(
-                QuizDatabaseHelper.TABLE_PLAYER_STATS,
-                null, QuizDatabaseHelper.STATS_COLUMN_ID + "=1", null, null, null, null);
+        Cursor cursor = null;
+        try {
+            cursor = dbHelper.getReadableDatabase().query(
+                    QuizDatabaseHelper.TABLE_PLAYER_STATS,
+                    null, QuizDatabaseHelper.STATS_COLUMN_ID + "=1", null, null, null, null);
 
-        if (cursor.moveToFirst()) {
-            localPlayerName = cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_NAME));
-            int singleWins = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_SINGLE_WINS));
-            int pvpWins = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_PVP_WINS));
+            if (cursor != null && cursor.moveToFirst()) {
+                localPlayerName = cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_NAME));
+                int singleWins = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_SINGLE_WINS));
+                int pvpWins = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.STATS_COLUMN_PVP_WINS));
 
-            tvPlayerName.setText(localPlayerName);
-
-            if (!isPvpMode) {
-                tvPlayerStats.setText(getString(R.string.wins_format, singleWins));
+                tvPlayerName.setText(localPlayerName != null ? localPlayerName : "noname");
+                if (!isPvpMode) tvPlayerStats.setText(getString(R.string.wins_format, singleWins));
+                else tvPlayerStats.setText(getString(R.string.wins_format, pvpWins));
             } else {
-                tvPlayerStats.setText(getString(R.string.wins_format, pvpWins));
+                localPlayerName = "noname";
+                tvPlayerName.setText(localPlayerName);
             }
-        } else {
+        } catch (Exception e) {
+            Log.w(TAG, "loadLocalPlayerInfo: DB read failed", e);
             localPlayerName = "noname";
+            tvPlayerName.setText(localPlayerName);
+        } finally {
+            if (cursor != null) cursor.close();
         }
-        cursor.close();
     }
 
-// --- НАСТРОЙКА РЕЖИМОВ ИГРЫ ---
+    private void loadOwnedEmotes() {
+        try {
+            QuizDatabaseHelper db = QuizDatabaseHelper.getInstance(this);
+            List<String> owned = db.getOwnedEmotes();
+            if (owned != null) ownedEmotes.addAll(owned);
+            Log.d(TAG, "Owned emotes: " + ownedEmotes);
+        } catch (Exception e) {
+            Log.w(TAG, "loadOwnedEmotes failed", e);
+        }
+    }
 
     private void setupSinglePlayerMode() {
         opponentName = "AI Opponent";
         tvOpponentName.setVisibility(View.GONE);
         tvOpponentStats.setVisibility(View.GONE);
         llOpponentIndicators.setVisibility(View.GONE);
-        findViewById(R.id.btn_emote_chat).setVisibility(View.GONE); // Скрыть эмоции в соло
+        findViewById(R.id.btn_emote_chat).setVisibility(View.GONE);
 
         vWaitingScreen.setVisibility(View.GONE);
         vGameContent.setVisibility(View.VISIBLE);
@@ -193,90 +260,32 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         }
     }
 
-    private void setupPvpMode() {
-        p2pManager = P2PConnectionSingleton.getInstance().getActiveManager();
-        opponentName = getIntent().getStringExtra("OPPONENT_NAME");
-
-        if (p2pManager == null || opponentName == null) {
-            Toast.makeText(this, "P2P соединение не активно.", Toast.LENGTH_LONG).show();
-            finish();
-            return;
-        }
-
-        p2pManager.initialize(this, this);
-
-        tvOpponentName.setText(opponentName);
-        tvOpponentStats.setText(getString(R.string.wins_format, 0)); // Обновится позже
-
-        showVsScreen();
-
-        // Определяем, кто начинает (например, тот, кто инициировал соединение, отправляет данные)
-        // Для простоты, мы будем использовать флаг isMyTurn как признак, что этот игрок отвечает за рассылку вопросов.
-        isMyTurn = getIntent().getBooleanExtra("IS_HOST", false);
-
-        if (isMyTurn) {
-            sendInitialData();
-        }
-    }
-
-    private void sendInitialData() {
-        loadQuestionsFromDB();
-
-        if (!currentQuestions.isEmpty()) {
-            GameDataModel startGameModel = new GameDataModel(GameDataModel.DataType.START_GAME, (Serializable) currentQuestions);
-            p2pManager.sendMessage(startGameModel);
-            gameInProgress = true;
-        } else {
-            Toast.makeText(this, "Не удалось загрузить вопросы для PVP.", Toast.LENGTH_LONG).show();
-            endGame();
-        }
-    }
-
-    private void showVsScreen() {
-        vGameContent.setVisibility(View.GONE);
-        vWaitingScreen.setVisibility(View.VISIBLE);
-
-        TextView vsText = findViewById(R.id.tv_vs_screen);
-        vsText.setText(String.format("%s VS %s", localPlayerName, opponentName));
-
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            vWaitingScreen.setVisibility(View.GONE);
-            vGameContent.setVisibility(View.VISIBLE);
-
-            // Если мы хост и уже отправили вопросы, начинаем игру
-            if (isPvpMode && isMyTurn && !currentQuestions.isEmpty()) {
-                showQuestion(currentQuestionIndex);
-            } else if (isPvpMode) {
-                showWaitingScreen();
-            }
-        }, 3000); // 3 секунды VS-экран
-    }
-
-// --- УПРАВЛЕНИЕ ВОПРОСАМИ И ЛОГИКА ---
-
     private void loadQuestionsFromDB() {
         QuizDatabaseHelper dbHelper = QuizDatabaseHelper.getInstance(this);
-        // Выбираем 5 случайных вопросов
+        currentQuestions.clear();
         Cursor cursor = dbHelper.getReadableDatabase().rawQuery(
                 "SELECT * FROM " + QuizDatabaseHelper.TABLE_QUESTIONS + " ORDER BY RANDOM() LIMIT " + TOTAL_QUESTIONS,
                 null);
 
-        if (cursor.moveToFirst()) {
-            do {
-                Question q = new Question();
-                q.id = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_ID));
-                q.question = cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_QUESTION));
-                q.options = new String[]{
-                        cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION1)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION2)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION3)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION4))
-                };
-                q.answerNum = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_ANSWER_NUM));
-                currentQuestions.add(q);
-            } while (cursor.moveToNext());
+        try {
+            if (cursor.moveToFirst()) {
+                do {
+                    Question q = new Question();
+                    q.id = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_ID));
+                    q.question = cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_QUESTION));
+                    q.options = new String[]{
+                            cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION1)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION2)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION3)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_OPTION4))
+                    };
+                    q.answerNum = cursor.getInt(cursor.getColumnIndexOrThrow(QuizDatabaseHelper.COLUMN_ANSWER_NUM));
+                    currentQuestions.add(q);
+                } while (cursor.moveToNext());
+            }
+        } finally {
+            if (cursor != null) cursor.close();
         }
-        cursor.close();
     }
 
     private void showQuestion(int index) {
@@ -292,9 +301,12 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         for (int i = 0; i < 4; i++) {
             answerButtons[i].setText(q.options[i]);
             answerButtons[i].setEnabled(true);
-            answerButtons[i].setBackgroundTintList(null); // Сброс цвета
+            answerButtons[i].setBackgroundTintList(null);
             answerButtons[i].setBackgroundColor(getColor(R.color.colorDefaultButton));
         }
+
+        // stop waiting video if any
+        stopWaitingVideo();
 
         vWaitingScreen.setVisibility(View.GONE);
         vGameContent.setVisibility(View.VISIBLE);
@@ -309,86 +321,110 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         TextView vsText = findViewById(R.id.tv_vs_screen);
         vsText.setText(R.string.waiting_for_opponent);
 
-        // TODO: Здесь проигрывание waiting_screen.mp4 в VideoView
-
-        // Пример анимации
-        Animation anim = new AlphaAnimation(0.0f, 1.0f);
-        anim.setDuration(500);
-        anim.setStartOffset(20);
-        anim.setRepeatMode(Animation.REVERSE);
-        anim.setRepeatCount(Animation.INFINITE);
-        vWaitingScreen.startAnimation(anim);
+        // Play waiting video if available (resource raw/waiting_screen.mp4)
+        int waitingRes = getResources().getIdentifier("waiting_screen", "raw", getPackageName());
+        if (waitingRes != 0 && vvOpponentEmoteDisplay != null) {
+            vvOpponentEmoteDisplay.setVisibility(View.VISIBLE);
+            Uri uri = Uri.parse("android.resource://" + getPackageName() + "/" + waitingRes);
+            vvOpponentEmoteDisplay.setVideoURI(uri);
+            vvOpponentEmoteDisplay.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    mp.setLooping(true);
+                    vvOpponentEmoteDisplay.start();
+                }
+            });
+        } else {
+            Animation anim = new AlphaAnimation(0.0f, 1.0f);
+            anim.setDuration(500);
+            anim.setStartOffset(20);
+            anim.setRepeatMode(Animation.REVERSE);
+            anim.setRepeatCount(Animation.INFINITE);
+            vWaitingScreen.startAnimation(anim);
+        }
 
         stopTimer();
     }
 
-// --- ТАЙМЕР И ОБРАБОТКА ОТВЕТА ---
+    private void stopWaitingVideo() {
+        if (vvOpponentEmoteDisplay != null && vvOpponentEmoteDisplay.isPlaying()) {
+            vvOpponentEmoteDisplay.stopPlayback();
+            vvOpponentEmoteDisplay.setVisibility(View.GONE);
+        }
+        vWaitingScreen.clearAnimation();
+    }
 
     private void startTimer() {
-        if (gameTimer != null) {
-            gameTimer.cancel();
-        }
+        if (gameTimer != null) gameTimer.cancel();
 
         gameTimer = new CountDownTimer(TIMER_DURATION_MS, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
+            @Override public void onTick(long millisUntilFinished) {
                 long seconds = millisUntilFinished / 1000;
                 tvTimer.setText(getString(R.string.timer_format, seconds));
             }
-
-            @Override
-            public void onFinish() {
-                // Время вышло: 0 - означает, что время вышло/нет ответа
+            @Override public void onFinish() {
+                // treat timeout as wrong answer (0)
                 handleAnswerSubmission(0);
             }
         }.start();
     }
 
     private void stopTimer() {
-        if (gameTimer != null) {
-            gameTimer.cancel();
-            gameTimer = null;
-        }
+        if (gameTimer != null) { gameTimer.cancel(); gameTimer = null; }
         tvTimer.setText(getString(R.string.timer_format, 0L));
     }
 
     private void handleAnswerSubmission(int selectedOption) {
-        if (!gameInProgress) return;
+        if (!isPvpMode) {
+            stopTimer();
+            Question q = currentQuestions.get(currentQuestionIndex);
+            boolean isCorrect = selectedOption > 0 && selectedOption == q.answerNum;
+            updateAnswerUI(selectedOption, q.answerNum, true);
+            if (isCorrect) { localPlayerScore += 20; QuizApplication.getInstance().playSound(R.raw.correct); }
+            else if (selectedOption > 0) { QuizApplication.getInstance().playSound(R.raw.incorrect); }
+            new Handler(Looper.getMainLooper()).postDelayed(this::moveToNextQuestion, 1500);
+            return;
+        }
 
+        // PvP
         stopTimer();
-
         Question q = currentQuestions.get(currentQuestionIndex);
         boolean isCorrect = selectedOption > 0 && selectedOption == q.answerNum;
 
-        // 1. Обновление UI
-        updateAnswerUI(selectedOption, q.answerNum);
+        updateAnswerUI(selectedOption, q.answerNum, true);
 
-        // 2. Начисление очков
         if (isCorrect) {
-            localPlayerScore += isPvpMode ? 25 : 20;
+            localPlayerScore += 25;
             QuizApplication.getInstance().playSound(R.raw.correct);
         } else if (selectedOption > 0) {
             QuizApplication.getInstance().playSound(R.raw.incorrect);
         }
 
-        // 3. Создание объекта ответа для синхронизации
         PlayerAnswer answer = new PlayerAnswer(currentQuestionIndex, selectedOption, isCorrect, true);
 
-        if (isPvpMode) {
-            // 4. Отправка ответа противнику
+        // mark answered locally
+        if (amHost) hostAnsweredCurrent = true; else clientAnsweredCurrent = true;
+
+        // send answer to opponent
+        try {
             p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.ANSWER_SUBMITTED, answer));
-
-            // 5. Передача хода (Ожидание ответа противника)
-            isMyTurn = false;
-
-        } else {
-            // 4. Одиночная игра: Просто ждем и переходим к следующему вопросу
-            new Handler(Looper.getMainLooper()).postDelayed(this::moveToNextQuestion, 1500);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to send ANSWER_SUBMITTED", e);
         }
+
+        // show waiting screen
+        isMyTurn = false;
+        stopWaitingVideo();
+        showWaitingScreen();
     }
 
-    private void updateAnswerUI(int selectedOption, int correctOption) {
-        // Подсветка кнопок
+    /**
+     * Update UI for a submitted answer.
+     * @param selectedOption selected by player (0 = timeout/no answer)
+     * @param correctOption correct answer index
+     * @param isLocal whether it's the local player's indicator (true) or opponent's (false)
+     */
+    private void updateAnswerUI(int selectedOption, int correctOption, boolean isLocal) {
         for (int i = 0; i < 4; i++) {
             if (i + 1 == correctOption) {
                 answerButtons[i].setBackgroundColor(getColor(R.color.colorCorrectAnswer));
@@ -398,21 +434,29 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
             answerButtons[i].setEnabled(false);
         }
 
-        // Обновление индикатора
-        ImageView indicator = (ImageView) llPlayerIndicators.getChildAt(currentQuestionIndex);
-        indicator.setColorFilter(getColor(selectedOption > 0 && selectedOption == correctOption ?
-                R.color.colorIndicatorGreen : R.color.colorIndicatorRed));
+        ImageView indicator = (ImageView) (isLocal ? llPlayerIndicators.getChildAt(currentQuestionIndex) : llOpponentIndicators.getChildAt(currentQuestionIndex));
+        if (indicator != null) {
+            indicator.setColorFilter(getColor(selectedOption > 0 && selectedOption == correctOption ?
+                    R.color.colorIndicatorGreen : R.color.colorIndicatorRed));
+        }
     }
 
     private void moveToNextQuestion() {
+        // Called by host to advance after both answered, or by singleplayer flow
         currentQuestionIndex++;
+        hostAnsweredCurrent = false;
+        clientAnsweredCurrent = false;
+        stopWaitingVideo();
         if (currentQuestionIndex < TOTAL_QUESTIONS) {
             if (isPvpMode) {
-                // В PVP, когда ход возвращается, показываем следующий вопрос
-                isMyTurn = true;
-                showQuestion(currentQuestionIndex);
+                if (amHost) {
+                    isMyTurn = true;
+                    showQuestion(currentQuestionIndex);
+                } else {
+                    isMyTurn = false;
+                    showWaitingScreen();
+                }
             } else {
-                // Одиночная игра: сразу показываем следующий вопрос
                 showQuestion(currentQuestionIndex);
             }
         } else {
@@ -420,96 +464,111 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         }
     }
 
-// --- P2P СИНХРОНИЗАЦИЯ И ОБРАБОТКА ДАННЫХ ---
-
     @Override
     public void onDataReceived(Serializable data) {
         runOnUiThread(() -> {
-            if (!(data instanceof GameDataModel)) return;
+            // handle PLAYER_NAME string
+            if (data instanceof String) {
+                String s = (String) data;
+                if (s.startsWith("PLAYER_NAME:")) {
+                    String remoteName = s.substring("PLAYER_NAME:".length()).trim();
+                    if (!remoteName.isEmpty()) {
+                        opponentName = remoteName;
+                        tvOpponentName.setText(opponentName);
+                        TextView vsText = findViewById(R.id.tv_vs_screen);
+                        if (vsText != null) vsText.setText(String.format("%s VS %s", localPlayerName, opponentName));
+                    }
+                    return;
+                }
+            }
 
+            if (!(data instanceof GameDataModel)) return;
             GameDataModel model = (GameDataModel) data;
 
             switch (model.type) {
                 case START_GAME:
+                    // Client receives the whole question list but should stay waiting until host answers
                     if (model.data instanceof List) {
                         currentQuestions.clear();
                         try {
                             currentQuestions.addAll((List<Question>) model.data);
                             gameInProgress = true;
-                            // Начинаем игру, если мы не хост (не отправляли вопросы)
-                            if (!isMyTurn) showWaitingScreen();
+                            // ensure client shows waiting screen at start
+                            if (!amHost) {
+                                isMyTurn = false;
+                                stopWaitingVideo();
+                                showWaitingScreen();
+                            }
                         } catch (ClassCastException e) {
-                            Log.e(TAG, "Ошибка приведения типов в START_GAME", e);
+                            Log.e(TAG, "Error casting START_GAME data", e);
                             endGame();
                         }
                     }
                     break;
+
                 case ANSWER_SUBMITTED:
                     if (model.data instanceof PlayerAnswer) {
-                        handleOpponentAnswer((PlayerAnswer) model.data);
+                        PlayerAnswer pa = (PlayerAnswer) model.data;
+                        // Update opponent indicator and score if correct
+                        ImageView indicator = (ImageView) llOpponentIndicators.getChildAt(pa.questionIndex);
+                        if (indicator != null) indicator.setColorFilter(getColor(pa.isCorrect ? R.color.colorIndicatorGreen : R.color.colorIndicatorRed));
+
+                        if (amHost) {
+                            // Host receives client's answer -> update opponentScore and then proceed to next question
+                            if (pa.isCorrect) opponentScore += 25;
+                            clientAnsweredCurrent = true;
+                            // If host already answered this question -> both answered -> host moves to next question
+                            if (hostAnsweredCurrent) {
+                                // small delay for UX
+                                new Handler(Looper.getMainLooper()).postDelayed(this::moveToNextQuestion, 800);
+                            }
+                        } else {
+                            // Client receives host's answer -> update opponentScore and now it's client's turn for same question
+                            if (pa.isCorrect) opponentScore += 25;
+                            hostAnsweredCurrent = true;
+                            // client becomes active
+                            isMyTurn = true;
+                            stopWaitingVideo();
+                            showQuestion(currentQuestionIndex);
+                        }
                     }
                     break;
+
                 case EMOTE_USED:
                     if (model.data instanceof EmoteAction) {
-                        showOpponentEmote(((EmoteAction) model.data).emoteName);
+                        String emoteId = ((EmoteAction) model.data).emoteName;
+                        // Show emote on opponent area
+                        showOpponentEmote(emoteId);
                     }
                     break;
+
                 case GAME_OVER:
-                    // Противник завершил игру, если у нас еще нет результатов
                     if (gameInProgress) endGame();
                     break;
             }
         });
     }
 
-    private void handleOpponentAnswer(PlayerAnswer opponentAnswer) {
-        // 1. Обновление счета противника
-        if (opponentAnswer.isCorrect) {
-            opponentScore += 25;
-            // QuizApplication.getInstance().playSound(R.raw.correct); // Играет локальный звук противника
-        } else if (opponentAnswer.selectedOption > 0) {
-            // QuizApplication.getInstance().playSound(R.raw.incorrect);
-        }
-
-        // 2. Обновление кружочков противника
-        ImageView indicator = (ImageView) llOpponentIndicators.getChildAt(opponentAnswer.questionIndex);
-        indicator.setColorFilter(getColor(opponentAnswer.isCorrect ?
-                R.color.colorIndicatorGreen : R.color.colorIndicatorRed));
-
-        // 3. Передача хода обратно (только если мы уже ответили на свой вопрос)
-        if (opponentAnswer.questionIndex == currentQuestionIndex) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                moveToNextQuestion(); // Вызовет showQuestion и isMyTurn = true
-            }, 1500);
-        } else if (opponentAnswer.questionIndex < currentQuestionIndex) {
-            // Если противник ответил раньше, чем мы, просто ждем нашего ответа.
-            // В идеале, ходы должны строго чередоваться.
-        }
-    }
-
-// --- КОНЕЦ ИГРЫ И ЭМОЦИИ ---
-
     private void endGame() {
         if (!gameInProgress) return;
         gameInProgress = false;
         stopTimer();
+        stopWaitingVideo();
 
         boolean isWinner = localPlayerScore > opponentScore;
         String message;
-
         if (isPvpMode) {
             message = isWinner ? "Победа!" : (localPlayerScore == opponentScore ? "Ничья" : "Поражение!");
             QuizApplication.getInstance().playSound(isWinner ? R.raw.victory : R.raw.defeat);
         } else {
             message = localPlayerScore > 0 ? "Одиночная игра завершена" : "Игра провалена.";
-            QuizApplication.getInstance().playSound(localPlayerScore > 0 ? R.raw.victory : R.raw.defeat);
+            QuizApplication.getInstance().playSound(localPlayerName != null ? R.raw.victory : R.raw.defeat);
         }
 
         saveGameResults(isWinner);
 
-        if (isPvpMode) {
-            // Отправляем противнику, что игра окончена
-            p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.GAME_OVER, null));
+        if (isPvpMode && p2pManager != null) {
+            try { p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.GAME_OVER, null)); } catch (Exception ignored) {}
             P2PConnectionSingleton.getInstance().clear();
         }
 
@@ -519,7 +578,6 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         resultsIntent.putExtra("LOCAL_SCORE", localPlayerScore);
         resultsIntent.putExtra("OPPONENT_SCORE", opponentScore);
         startActivity(resultsIntent);
-
         finish();
     }
 
@@ -528,59 +586,80 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         dbHelper.updatePlayerStats(localPlayerScore, isPvpMode, isWinner);
     }
 
+    // EMOTES
     private void showEmoteSelectionDialog() {
-        // TODO: Загрузка купленных эмоций из БД (например, "laugh", "cry", "angry")
-        String[] ownedEmotes = {"laugh", "cry", "angry"}; // Имена, соответствующие raw-файлам
-        String[] displayNames = {"Смех 😂", "Плач 😭", "Злость 😡"}; // Отображаемые имена
+        List<String> owned = new ArrayList<>(ownedEmotes);
+        if (owned.isEmpty()) {
+            Toast.makeText(this, "У вас нет купленных эмоций.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] ownedArray = owned.toArray(new String[0]);
+        String[] displayNames = new String[ownedArray.length];
+        for (int i = 0; i < ownedArray.length; i++) displayNames[i] = ownedArray[i];
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Выберите эмоцию");
         builder.setItems(displayNames, (dialog, which) -> {
-            String selectedEmoteId = ownedEmotes[which];
-            showLocalEmote(selectedEmoteId);
-
+            String selectedEmoteId = ownedArray[which];
+            // Normalize id to resource name (strip "emote_" prefix and extension if present)
+            String resName = normalizeEmoteIdToResourceName(selectedEmoteId);
+            // Local play
+            showLocalEmote(resName);
+            // send to opponent
             if (isPvpMode && p2pManager != null) {
-                p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.EMOTE_USED, new EmoteAction(selectedEmoteId)));
+                try {
+                    p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.EMOTE_USED, new EmoteAction(resName)));
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to send EMOTE_USED", e);
+                }
             }
         });
         builder.show();
     }
 
-    private void playEmoteVideo(VideoView videoView, String emoteName) {
-        int resourceId = getResources().getIdentifier(emoteName, "raw", getPackageName());
+    private String normalizeEmoteIdToResourceName(String id) {
+        if (id == null) return "";
+        String res = id;
+        // remove extension
+        int dot = res.lastIndexOf('.');
+        if (dot > 0) res = res.substring(0, dot);
+        // remove "emote_" prefix if present
+        if (res.startsWith("emote_")) res = res.substring("emote_".length());
+        return res;
+    }
 
+    private void playEmoteVideo(VideoView videoView, String emoteName) {
+        if (emoteName == null || emoteName.isEmpty()) return;
+        String resName = normalizeEmoteIdToResourceName(emoteName);
+        int resourceId = getResources().getIdentifier(resName, "raw", getPackageName());
         if (resourceId != 0) {
             videoView.setVisibility(View.VISIBLE);
-
-            // Создаем URI из ресурса
             Uri uri = Uri.parse("android.resource://" + getPackageName() + "/" + resourceId);
             videoView.setVideoURI(uri);
-
-            // Начинаем проигрывание
-            videoView.start();
-
-            // Скрываем VideoView после завершения видео
+            videoView.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    mp.setLooping(false);
+                    videoView.start();
+                }
+            });
             videoView.setOnCompletionListener(mp -> videoView.setVisibility(View.GONE));
+        } else {
+            Log.w(TAG, "Emote resource not found: " + emoteName + " (tried " + resName + ")");
         }
     }
 
     private void showLocalEmote(String emoteName) {
-        // Показываем эмоцию справа внизу (для локального игрока)
         playEmoteVideo(vvEmoteDisplay, emoteName);
     }
 
     private void showOpponentEmote(String emoteName) {
-        // Показываем эмоцию слева вверху (для противника)
         playEmoteVideo(vvOpponentEmoteDisplay, emoteName);
     }
 
-// --- ОБРАБОТКА P2P ОШИБОК И ЖИЗНЕННОГО ЦИКЛА ---
-
-    @Override
-    public void onConnected(String deviceName, ConnectionType type) { /* Игнорируем */ }
-
-    @Override
-    public void onConnectionFailed(String message) {
+    @Override public void onConnected(String deviceName, ConnectionType type) {}
+    @Override public void onConnectionFailed(String message) {
         runOnUiThread(() -> {
             if (isPvpMode) {
                 Toast.makeText(this, "P2P Ошибка: " + message, Toast.LENGTH_LONG).show();
@@ -594,39 +673,34 @@ public class GameActivity extends AppCompatActivity implements P2PManager.Connec
         runOnUiThread(() -> {
             if (isPvpMode && gameInProgress) {
                 Toast.makeText(this, "Противник отключился: " + reason, Toast.LENGTH_LONG).show();
-                // Объявляем победу, если противник отключился во время игры
-                localPlayerScore = 999;
-                opponentScore = 0;
+                // award remaining player 20 points (as requested)
+                localPlayerScore += 20;
                 endGame();
             }
         });
     }
 
-    @Override
-    public void onDeviceFound(String deviceName, String deviceAddress) { /* Игнорируем */ }
-    @Override
-    public void onDeviceLost(String deviceAddress) { /* Игнорируем */ }
+    @Override public void onDeviceFound(String deviceName, String deviceAddress) {}
+    @Override public void onDeviceLost(String deviceAddress) {}
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy() {
         super.onDestroy();
-        if (gameTimer != null) {
-            gameTimer.cancel();
-        }
-        if (isPvpMode && p2pManager != null) {
-            P2PConnectionSingleton.getInstance().clear();
-        }
+        if (gameTimer != null) gameTimer.cancel();
+        stopWaitingVideo();
         QuizApplication.getInstance().startBackgroundMusic();
     }
 
-    @Override
-    public void onBackPressed() {
+    @Override public void onBackPressed() {
         new AlertDialog.Builder(this)
                 .setTitle("Выход из игры")
                 .setMessage("Вы уверены, что хотите выйти? Вы проиграете игру.")
                 .setPositiveButton("Выйти", (dialog, which) -> {
+                    // If quitting during PvP, inform opponent by best-effort GAME_OVER
+                    if (isPvpMode && p2pManager != null) {
+                        try { p2pManager.sendMessage(new GameDataModel(GameDataModel.DataType.GAME_OVER, null)); } catch (Exception ignored) {}
+                    }
                     localPlayerScore = 0;
-                    opponentScore = isPvpMode ? 999 : 0; // В PVP противник побеждает
+                    opponentScore = isPvpMode ? 20 : 0; // if leaving, opponent will get 20
                     endGame();
                 })
                 .setNegativeButton("Отмена", null)

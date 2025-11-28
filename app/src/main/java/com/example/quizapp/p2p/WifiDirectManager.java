@@ -165,13 +165,11 @@ public class WifiDirectManager implements P2PManager {
             return;
         }
 
-        // --- ИСПРАВЛЕНИЕ: Используем найденный объект WifiP2pDevice ---
         final WifiP2pDevice deviceToConnect = findWifiP2pDevice(deviceAddress);
         if (deviceToConnect == null) {
             listener.onConnectionFailed("Устройство не найдено в списке пиров.");
             return;
         }
-        // -------------------------------------------------------------
 
         WifiP2pConfig config = new WifiP2pConfig();
         config.deviceAddress = deviceAddress;
@@ -231,6 +229,7 @@ public class WifiDirectManager implements P2PManager {
                     Log.d(TAG, "Disconnected/Group removed successfully.");
                     listener.onDisconnected("Группа Wi-Fi Direct удалена.");
                     connectedDevice = null;
+                    P2PConnectionSingleton.getInstance().setGroupOwner(false);
                 }
 
                 @Override
@@ -241,22 +240,16 @@ public class WifiDirectManager implements P2PManager {
         }
     }
 
-    // --- Утилиты ---
+    // --- Utilities ---
 
-    /**
-     * Проверяет, предоставлены ли необходимые разрешения для работы Wi-Fi Direct.
-     * КРИТИЧЕСКИЕ ИЗМЕНЕНИЯ: Добавлена проверка NEARBY_WIFI_DEVICES для API 31+.
-     */
     private boolean checkPermissions(Context ctx) {
-        // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Проверка NEARBY_WIFI_DEVICES для Android 12+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // S = API 31 (Android 12)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "Permissions check failed: NEARBY_WIFI_DEVICES is missing.");
                 return false;
             }
         }
 
-        // ACCESS_FINE_LOCATION (Все еще требуется до API 31 и часто используется как общая проверка)
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.e(TAG, "Permissions check failed: ACCESS_FINE_LOCATION is missing.");
             return false;
@@ -274,7 +267,7 @@ public class WifiDirectManager implements P2PManager {
         return null;
     }
 
-    // --- BroadcastReceiver ---
+    // --- BroadcastReceiver and listeners ---
 
     private final WifiP2pManager.PeerListListener peerListListener = new WifiP2pManager.PeerListListener() {
         @Override
@@ -306,20 +299,21 @@ public class WifiDirectManager implements P2PManager {
             final InetAddress groupOwnerAddress = info.groupOwnerAddress;
 
             if (info.groupFormed && info.isGroupOwner) {
-                // Режим хоста (сервера)
                 Log.d(TAG, "Device is Group Owner (Server).");
                 if (serverThread == null) {
                     serverThread = new ServerThread(groupOwnerAddress);
                     executor.execute(serverThread);
                 }
+                // Устанавливаем флаг groupOwner в синглтоне
+                P2PConnectionSingleton.getInstance().setGroupOwner(true);
                 listener.onConnected("Хост", type);
             } else if (info.groupFormed) {
-                // Режим клиента
                 Log.d(TAG, "Device is Client.");
                 if (clientThread == null) {
                     clientThread = new ClientThread(groupOwnerAddress);
                     executor.execute(clientThread);
                 }
+                P2PConnectionSingleton.getInstance().setGroupOwner(false);
                 listener.onConnected("Клиент", type);
             }
         }
@@ -344,7 +338,6 @@ public class WifiDirectManager implements P2PManager {
                         manager.requestPeers(channel, peerListListener);
                     } else {
                         Log.e(TAG, "Permissions missing for requesting peers. Cannot call requestPeers.");
-                        // ИНФОРМИРУЕМ СЛУШАТЕЛЯ: При отсутствии разрешений
                         listener.onConnectionFailed("Ошибка: Необходимые Wi-Fi Direct разрешения отсутствуют.");
                     }
                 }
@@ -359,7 +352,6 @@ public class WifiDirectManager implements P2PManager {
                         manager.requestConnectionInfo(channel, connectionInfoListener);
                     } else {
                         Log.e(TAG, "Permissions missing for requesting connection info.");
-                        // ИНФОРМИРУЕМ СЛУШАТЕЛЯ: При отсутствии разрешений
                         listener.onConnectionFailed("Ошибка: Необходимые Wi-Fi Direct разрешения отсутствуют.");
                     }
                 } else {
@@ -381,8 +373,7 @@ public class WifiDirectManager implements P2PManager {
         }
     }
 
-    // --- Потоки обмена данными (оставлены без изменений) ---
-
+    // --- Data exchange threads (unchanged) ---
     private void dataExchangeConnected(Socket socket) {
         Log.d(TAG, "Socket connected. Starting DataTransferThread.");
         if (dataTransferThread != null) {
